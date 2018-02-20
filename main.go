@@ -8,6 +8,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log/syslog"
 	"os"
 	"os/signal"
@@ -45,6 +46,9 @@ func initLogger(logLevel string) error {
 
 	shimLog.SetLevel(level)
 
+	// Make sure we discard all output going to stdout/stderr.
+	shimLog.Out = ioutil.Discard
+
 	hook, err := lSyslog.NewSyslogHook("", "", syslog.LOG_INFO|syslog.LOG_USER, shimName)
 	if err == nil {
 		shimLog.AddHook(hook)
@@ -67,7 +71,7 @@ func main() {
 	)
 
 	flag.BoolVar(&showVersion, "version", false, "display program version and exit")
-	flag.StringVar(&logLevel, "log", "warn", "set shim log level: debug, info, warn, error, fatal or panic")
+	flag.StringVar(&logLevel, "log", "debug", "set shim log level: debug, info, warn, error, fatal or panic")
 	flag.StringVar(&agentAddr, "agent", "", "agent gRPC socket endpoint")
 
 	flag.StringVar(&container, "container", "", "container id for the shim")
@@ -99,11 +103,6 @@ func main() {
 		os.Exit(exitFailure)
 	}
 
-	// stdio
-	wg := &sync.WaitGroup{}
-	shim.proxyStdio(wg, terminal)
-	defer wg.Wait()
-
 	// winsize
 	if terminal {
 		termios, err := setupTerminal(int(os.Stdin.Fd()))
@@ -118,6 +117,11 @@ func main() {
 	// signals
 	sigc := shim.forwardAllSignals()
 	defer signal.Stop(sigc)
+
+	// stdio
+	wg := &sync.WaitGroup{}
+	shim.proxyStdio(wg, terminal)
+	wg.Wait()
 
 	// wait until exit
 	exitcode, err := shim.wait()
